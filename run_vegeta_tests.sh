@@ -5,26 +5,37 @@ FIXED_RATE=100      # 固定レートテストの秒間リクエスト数
 FIXED_DURATION="30s" # 固定レートテストの実行時間
 MAX_DURATION="30s"   # 最大スループットテストの実行時間
 
+# テスト対象ホスト (環境変数 TARGET_HOST が設定されていればそれを使用)
+TARGET_HOST="${TARGET_HOST:-http://localhost:8080}"
+
 # ディレクトリ設定
 RESULTS_DIR="results"
 TARGETS_DIR="vegeta_targets"
+TEMP_DIR=$(mktemp -d) # 一時ファイル用ディレクトリ
 
 # vegeta コマンドのパス (環境によってはフルパス指定が必要な場合あり)
 VEGETA_CMD="vegeta"
+
+# 結果ディレクトリを作成 (存在しない場合)
+mkdir -p "$RESULTS_DIR"
+
+# 一時ディレクトリ削除のトラップ
+trap 'rm -rf "$TEMP_DIR"' EXIT
 
 # ターゲットファイル一覧を取得
 # shellcheck disable=SC2012
 targets=$(ls "${TARGETS_DIR}"/*.txt | sort) # ファイル名順にソート
 
 echo "Starting Vegeta tests..."
+echo "Target Host: ${TARGET_HOST}"
 echo "Fixed Rate: ${FIXED_RATE}/s, Duration: ${FIXED_DURATION}"
 echo "Max Throughput Duration: ${MAX_DURATION}"
 echo "Results will be saved in '${RESULTS_DIR}' directory."
 echo "=================================================="
 
 # サーバーが起動しているか確認 (簡易チェック)
-if ! curl -s -o /dev/null http://localhost:8080/; then
-    echo "ERROR: HTTP server is not running or not accessible at http://localhost:8080/"
+if ! curl -s -o /dev/null "${TARGET_HOST}/"; then
+    echo "ERROR: HTTP server is not running or not accessible at ${TARGET_HOST}/"
     echo "Please start the server first (e.g., ./server_app)"
     exit 1
 fi
@@ -36,11 +47,15 @@ for target_file in $targets; do
     echo ""
     echo "--- Testing target: $target_name ---"
 
+    # 一時的なターゲットファイルを作成し、ホスト名を置換
+    temp_target_file="${TEMP_DIR}/${target_name}.txt"
+    sed "s|http://localhost:8080|${TARGET_HOST}|g" "$target_file" > "$temp_target_file"
+
     # --- 固定レートテスト ---
     fixed_bin_output="${RESULTS_DIR}/${target_name}_fixed.bin"
     fixed_txt_output="${RESULTS_DIR}/${target_name}_fixed.txt"
     echo "[${target_name}] Running fixed rate test..."
-    if ${VEGETA_CMD} attack -targets="$target_file" -rate="$FIXED_RATE" -duration="$FIXED_DURATION" -output="$fixed_bin_output"; then
+    if ${VEGETA_CMD} attack -targets="$temp_target_file" -rate="$FIXED_RATE" -duration="$FIXED_DURATION" -output="$fixed_bin_output"; then
         echo "[${target_name}] Generating fixed rate report..."
         ${VEGETA_CMD} report "$fixed_bin_output" > "$fixed_txt_output"
         echo "[${target_name}] Fixed rate test completed."
@@ -54,7 +69,7 @@ for target_file in $targets; do
     max_txt_output="${RESULTS_DIR}/${target_name}_max.txt"
     echo "[${target_name}] Running max throughput test..."
     # rate=0 で最大スループットを試みる (-max-workers が必要)
-    if ${VEGETA_CMD} attack -targets="$target_file" -rate=0 -max-workers=100 -duration="$MAX_DURATION" -output="$max_bin_output"; then
+    if ${VEGETA_CMD} attack -targets="$temp_target_file" -rate=0 -max-workers=100 -duration="$MAX_DURATION" -output="$max_bin_output"; then
         echo "[${target_name}] Generating max throughput report..."
         ${VEGETA_CMD} report "$max_bin_output" > "$max_txt_output"
         echo "[${target_name}] Max throughput test completed."
