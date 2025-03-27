@@ -39,6 +39,13 @@ jobs:
     - name: Wait for server to start
       run: |
         echo "Waiting for server to start..."
+    - name: Run Load Tests
+      run: go test -v -run ^TestLoad$ -timeout 0 ./internal/handler/...
+      # -v: 詳細出力
+      # -run ^TestLoad$: TestLoad関数のみ実行
+      # -timeout 0: タイムアウト無制限
+      # ./internal/handler/...: テスト対象パッケージ
+
         timeout=60 # 最大待機時間 (秒)
         start_time=$(date +%s)
         while ! curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ | grep -q 200; do
@@ -52,10 +59,6 @@ jobs:
         done
         echo "Server started!"
 
-    - name: Run Vegeta tests
-      run: |
-        chmod +x ./run_vegeta_tests.sh
-        ./run_vegeta_tests.sh
 
     - name: Upload Go Benchmark Results
       uses: actions/upload-artifact@v4
@@ -63,8 +66,8 @@ jobs:
         name: go-benchmark-results
         path: go_benchmark_results.txt
 
-    - name: Upload Vegeta Results
+    - name: Upload Load Test Results
       uses: actions/upload-artifact@v4
       with:
-        name: vegeta-results
+        name: load-test-results
         path: results/ # results ディレクトリ全体をアップロード
