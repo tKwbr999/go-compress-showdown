@@ -52,7 +52,8 @@ type ReportData struct {
 var (
 	requestsRe    = regexp.MustCompile(`Requests\s+\[total, rate, throughput\]\s+(\d+),\s+([\d.]+),\s+([\d.]+)`)
 	durationRe    = regexp.MustCompile(`Duration\s+\[total, attack, wait\]\s+([\d.]+)s,\s+([\d.]+)s,\s+([\d.]+)s`)
-	latenciesRe   = regexp.MustCompile(`Latencies\s+\[mean, 50, 95, 99, max\]\s+([\d.]+)ms,\s+([\d.]+)ms,\s+([\d.]+)ms,\s+([\d.]+)ms,\s+([\d.]+)ms`)
+	// Capture value and unit separately for latencies
+	latenciesRe   = regexp.MustCompile(`Latencies\s+\[min, mean, 50, 90, 95, 99, max\]\s+([\d.]+)(ms|µs|s),\s+([\d.]+)(ms|µs|s),\s+([\d.]+)(ms|µs|s),\s+([\d.]+)(ms|µs|s),\s+([\d.]+)(ms|µs|s),\s+([\d.]+)(ms|µs|s),\s+([\d.]+)(ms|µs|s)`)
 	bytesRe       = regexp.MustCompile(`Bytes\s+\[total, mean\]\s+(\d+),\s+([\d.]+)`) // Assuming Bytes In
 	bytesOutRe    = regexp.MustCompile(`Bytes Out\s+\[total, mean\]\s+(\d+),\s+([\d.]+)`) // Need to confirm exact vegeta output format
 	successRe     = regexp.MustCompile(`Success\s+\[ratio\]\s+([\d.]+)%`)
@@ -77,6 +78,25 @@ func getFileSize(path string) int64 {
 	}
 	return fileInfo.Size()
 }
+
+// parseLatencyValue parses a latency string (value + unit) and returns the value in milliseconds.
+func parseLatencyValue(valueStr, unitStr string) (float64, error) {
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return 0, err
+	}
+	switch unitStr {
+	case "s":
+		return value * 1000, nil // seconds to milliseconds
+	case "ms":
+		return value, nil // already milliseconds
+	case "µs":
+		return value / 1000, nil // microseconds to milliseconds
+	default:
+		return 0, fmt.Errorf("unknown latency unit: %s", unitStr)
+	}
+}
+
 
 
 func parseVegetaReport(filePath string) (Result, error) {
@@ -118,12 +138,23 @@ func parseVegetaReport(filePath string) (Result, error) {
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 	err := cmd.Run()
+	stderrStr := stderr.String()
+
 	if err != nil {
-		result.Error = fmt.Sprintf("vegeta report failed: %v, stderr: %s", err, stderr.String())
-		// Even if the command fails, try to parse partial output
+		// Log the error with file context, store a simpler message in result
+		log.Printf("Error running vegeta report for %s: %v. Stderr: %s", filePath, err, stderrStr)
+		result.Error = fmt.Sprintf("vegeta report command failed: %v", err)
+		// Even if the command fails, try to parse partial output from stdout
+	} else if len(stderrStr) > 0 {
+		// Log stderr even if the command succeeded, as it might contain warnings
+		log.Printf("Warning/Info from vegeta report for %s (stderr): %s", filePath, stderrStr)
+		// Optionally append stderr to result.Error if needed, but might be noisy
+		// result.Error += " Vegeta Stderr: " + stderrStr
 	}
 
 	output := out.String()
+	// Add debug log to check the actual output being parsed
+	log.Printf("Debug [%s]: Vegeta report output:\n---\n%s\n---", filePath, output)
 
 	// --- Parse metrics ---
 	if m := requestsRe.FindStringSubmatch(output); len(m) == 4 {
@@ -133,13 +164,34 @@ func parseVegetaReport(filePath string) (Result, error) {
 	}
 	if m := durationRe.FindStringSubmatch(output); len(m) == 4 {
 		// Using total duration
-		result.Duration, _ = strconv.ParseFloat(m[1], 64)
+		var err error
+		result.Duration, err = strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			log.Printf("Warning [%s]: Failed to parse Duration '%s': %v", result.FileName, m[1], err)
+		}
 	}
-	if m := latenciesRe.FindStringSubmatch(output); len(m) == 6 {
-		result.LatencyMean, _ = strconv.ParseFloat(m[1], 64)
-		result.Latency50, _ = strconv.ParseFloat(m[2], 64)
-		result.Latency95, _ = strconv.ParseFloat(m[3], 64)
-		result.Latency99, _ = strconv.ParseFloat(m[4], 64)
+	// Expecting 15 matches: full string + 7 pairs of (value, unit)
+	if m := latenciesRe.FindStringSubmatch(output); len(m) == 15 {
+		var err error
+		// Indices: 1=minVal, 2=minUnit, 3=meanVal, 4=meanUnit, 5=50Val, 6=50Unit, ... 13=maxVal, 14=maxUnit
+		result.LatencyMean, err = parseLatencyValue(m[3], m[4]) // Mean
+		if err != nil {
+			log.Printf("Warning [%s]: Failed to parse LatencyMean '%s%s': %v", result.FileName, m[3], m[4], err)
+		}
+		result.Latency50, err = parseLatencyValue(m[5], m[6]) // 50th
+		if err != nil {
+			log.Printf("Warning [%s]: Failed to parse Latency50 '%s%s': %v", result.FileName, m[5], m[6], err)
+		}
+		result.Latency95, err = parseLatencyValue(m[9], m[10]) // 95th
+		if err != nil {
+			log.Printf("Warning [%s]: Failed to parse Latency95 '%s%s': %v", result.FileName, m[9], m[10], err)
+		}
+		result.Latency99, err = parseLatencyValue(m[11], m[12]) // 99th
+		if err != nil {
+			log.Printf("Warning [%s]: Failed to parse Latency99 '%s%s': %v", result.FileName, m[11], m[12], err)
+		}
+	} else if len(output) > 0 { // Only log if there was output to parse
+		log.Printf("Warning [%s]: Could not parse Latencies line or wrong number of matches. Expected 15, got %d.", result.FileName, len(m))
 	}
 	// Vegeta report might show Bytes In (request size) and Bytes Out (response size)
 	// We are interested in the response size (Bytes Out) for compression ratio,
@@ -349,12 +401,14 @@ func main() {
 	}
 
 	var allResults []Result
+hasError := false // エラー追跡フラグ
 	for _, file := range files {
 		if !file.IsDir() && strings.HasSuffix(file.Name(), ".bin") {
 			filePath := filepath.Join(resultsDir, file.Name())
 			result, err := parseVegetaReport(filePath)
 			if err != nil {
 				log.Printf("Error parsing %s: %v", file.Name(), err)
+			hasError = true // エラー発生時にフラグを立てる
 				// Store partial result with error
 				if result.FileName == "" { // If filename parsing failed
 					result.FileName = file.Name()
@@ -428,7 +482,8 @@ func main() {
 	// Create images directory
 	imagesDir := "report_images"
 	if err := os.MkdirAll(imagesDir, 0755); err != nil {
-		log.Fatalf("Failed to create images directory %s: %v", imagesDir, err)
+		log.Printf("Error creating images directory %s: %v", imagesDir, err) // Use log.Printf
+		hasError = true
 	}
 
 	   // Generate plots
@@ -451,7 +506,14 @@ func main() {
 	outputFile := "compression_benchmark_report.md"
 	err = os.WriteFile(outputFile, reportContent.Bytes(), 0644)
 	if err != nil {
-		log.Fatalf("Failed to write report file %s: %v", outputFile, err)
+		log.Printf("Error writing report file %s: %v", outputFile, err) // Use log.Printf instead of Fatalf
+		hasError = true
+
+	if hasError {
+		log.Println("Errors occurred during report generation.")
+		os.Exit(1)
+	}
+
 	}
 
 	fmt.Printf("Report successfully generated: %s\n", outputFile)
