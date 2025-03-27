@@ -1,0 +1,9 @@
+This is a small test file for compression benchmarks.
+It contains simple text repeated multiple times to provide some basic structure for compression algorithms to work with.
+Repeat: text text text text text text text text text text.
+Numbers: 1234567890 0987654321.
+Symbols: !@#$%^&*()_+=-`~[]{}\|;:'",.<>/?
+The quick brown fox jumps over the lazy dog.
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+This is the end of the small test file.

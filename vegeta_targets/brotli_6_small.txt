@@ -1,0 +1,1 @@
+GET http://localhost:8080/brotli?level=6&data=small

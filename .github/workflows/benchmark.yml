@@ -1,0 +1,57 @@
+name: Go Compression Benchmark
+
+on:
+  push:
+    branches: [ main ] # mainブランチへのpushで実行 (必要に応じて変更)
+  pull_request:
+    branches: [ main ] # mainブランチへのpull requestでも実行 (必要に応じて変更)
+  workflow_dispatch: # 手動実行も可能にする
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest # 実行環境
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21' # プロジェクトで使用するGoのバージョン
+
+    - name: Install dependencies
+      run: |
+        go mod download
+        go install github.com/tsenart/vegeta/v12@latest
+
+    - name: Run Go Benchmarks
+      run: go test -bench=. -benchmem ./internal/compressor > go_benchmark_results.txt
+      # 結果をファイルに出力
+
+    - name: Build server
+      run: go build -o server_app ./cmd/server
+
+    - name: Start server in background
+      run: ./server_app & # バックグラウンドでサーバーを起動
+      # GitHub Actions環境では、バックグラウンドプロセスが後続ステップで利用可能
+
+    - name: Wait for server to start
+      run: sleep 5 # サーバー起動を待機 (必要に応じて調整)
+
+    - name: Run Vegeta tests
+      run: |
+        chmod +x ./run_vegeta_tests.sh
+        ./run_vegeta_tests.sh
+
+    - name: Upload Go Benchmark Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: go-benchmark-results
+        path: go_benchmark_results.txt
+
+    - name: Upload Vegeta Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: vegeta-results
+        path: results/ # results ディレクトリ全体をアップロード
