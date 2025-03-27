@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # テストパラメータ (必要に応じて調整してください)
-FIXED_RATE=100      # 固定レートテストの秒間リクエスト数
-FIXED_DURATION="30s" # 固定レートテストの実行時間
-MAX_DURATION="30s"   # 最大スループットテストの実行時間
+FIXED_RATE=50       # 固定レートテストの秒間リクエスト数 (負荷軽減のため調整)
+FIXED_DURATION="15s" # 固定レートテストの実行時間 (負荷軽減のため調整)
+MAX_DURATION="15s"   # 最大スループットテストの実行時間 (負荷軽減のため調整)
 
 # テスト対象ホスト (環境変数 TARGET_HOST が設定されていればそれを使用)
 TARGET_HOST="${TARGET_HOST:-http://localhost:8080}"
@@ -69,7 +69,8 @@ for target_file in $targets; do
     max_txt_output="${RESULTS_DIR}/${target_name}_max.txt"
     echo "[${target_name}] Running max throughput test..."
     # rate=0 で最大スループットを試みる (-max-workers が必要)
-    if ${VEGETA_CMD} attack -targets="$temp_target_file" -rate=0 -max-workers=100 -duration="$MAX_DURATION" -output="$max_bin_output"; then
+    # rate=0 で最大スループットを試みる (-max-workers を調整)
+    if ${VEGETA_CMD} attack -targets="$temp_target_file" -rate=0 -max-workers=50 -duration="$MAX_DURATION" -output="$max_bin_output"; then
         echo "[${target_name}] Generating max throughput report..."
         ${VEGETA_CMD} report "$max_bin_output" > "$max_txt_output"
         echo "[${target_name}] Max throughput test completed."
