@@ -12,18 +12,17 @@ import (
 	"time"
 
 	vegeta "github.com/tsenart/vegeta/v12/lib"
-	"github.com/tsenart/vegeta/v12/lib/attack"
 )
 
 const (
-	targetHost        = "http://localhost:8080" // テスト対象ホスト
-	targetsDir        = "../../vegeta_targets"  // ターゲットファイルディレクトリ (テストファイルからの相対パス)
-	resultsDir        = "../../results"         // 結果出力ディレクトリ (テストファイルからの相対パス)
-	fixedRate         = 50                    // 固定レート (リクエスト/秒)
-	fixedDuration     = 15 * time.Second      // 固定レートテスト時間
-	maxDuration       = 15 * time.Second      // 最大スループットテスト時間
-	maxWorkers uint64 = 50                    // 最大ワーカー数
-	serverWaitTimeout = 60 * time.Second      // サーバー起動待機タイムアウト
+	targetHost               = "http://localhost:8080" // テスト対象ホスト
+	targetsDir               = "../../vegeta_targets"  // ターゲットファイルディレクトリ (テストファイルからの相対パス)
+	resultsDir               = "../../results"         // 結果出力ディレクトリ (テストファイルからの相対パス)
+	fixedRate                = 50                      // 固定レート (リクエスト/秒)
+	fixedDuration            = 15 * time.Second        // 固定レートテスト時間
+	maxDuration              = 15 * time.Second        // 最大スループットテスト時間
+	maxWorkers        uint64 = 50                      // 最大ワーカー数
+	serverWaitTimeout        = 60 * time.Second        // サーバー起動待機タイムアウト
 )
 
 // setup ensures the results directory exists and the server is running.
@@ -69,7 +68,7 @@ func runVegetaTest(t *testing.T, targetName, testType string, attacker *vegeta.A
 	}
 
 	// Attack実行、結果をbinファイルとmetricsに格納
-	var results attack.Results
+	var results <-chan *vegeta.Result
 	if binFile != nil {
 		results = attacker.Attack(targeter, rate, duration, targetName+"_"+testType)
 	} else {
@@ -79,7 +78,6 @@ func runVegetaTest(t *testing.T, targetName, testType string, attacker *vegeta.A
 		}
 		metrics.Close()
 	}
-
 
 	// 結果をエンコードしてファイルに書き込む (binFileがnilでない場合)
 	successCount := uint64(0)
@@ -100,10 +98,9 @@ func runVegetaTest(t *testing.T, targetName, testType string, attacker *vegeta.A
 		metrics.Close()
 	} else {
 		// binファイルがない場合はmetricsからカウント (概算になる可能性あり)
-		successCount = metrics.StatusCodes["200"] // 簡易的に200のみカウント
+		successCount = uint64(metrics.StatusCodes["200"]) // 簡易的に200のみカウント
 		totalCount = metrics.Requests
 	}
-
 
 	t.Logf("[%s] %s test completed. Total requests: %d, Success: %d", targetName, testType, totalCount, successCount)
 
@@ -183,7 +180,6 @@ func newTargeterFromVegetaFile(filePath, host string) (vegeta.Targeter, error) {
 
 	return vegeta.NewStaticTargeter(targets...), nil
 }
-
 
 // TestLoad performs load testing for all targets defined in the targets directory.
 func TestLoad(t *testing.T) {
